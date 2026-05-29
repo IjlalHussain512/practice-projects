@@ -180,9 +180,9 @@ assert mae_pre < 0.05, "Pretrain did not converge to the initial model — do no
 # Re-running this cell automatically RESUMES from the latest checkpoint, so a
 # ~12-14h / 8001-epoch run can be done in chunks. alpha=0 = paper Section 0.
 # ============================================================================
-MAX_ITER = 8001
+MAX_ITER = 1001     # SANITY TEST first (~2 h). If the predicted range climbs past ~4 km/s, set this to 8001 and re-run (it resumes).
 LR = 1e-4
-ALPHA = 0                                                   # paper Section 0 (no TV); try 0.01 if deep section won't lift
+ALPHA = 0                                                   # paper Section 0 (no TV), as you chose
 
 save_prefix = os.path.join(
     CKPT, "HalfMarmousi_SIREN_IFWI_nz{}_nx{}_ns{}_dz{:.0f}_freq{:.0f}_lr{:.0e}-".format(
@@ -216,6 +216,12 @@ np.save(os.path.join(PROJECT, "Data/siren_loss_half_8001.npy"), np.array(train_l
 
 # ============================================================================
 # CELL 6 — Evaluate BEST checkpoint + supervisor's 3-panel figure
+# ----------------------------------------------------------------------------
+# After the 1001-epoch test: read "Predicted range" below.
+#   * climbing toward ~4.5-5.5 km/s in the deep section  -> set MAX_ITER=8001
+#     in CELL 5 and re-run CELL 5 (auto-resumes from 1001), then re-run CELL 6.
+#   * still capped near ~3.9 km/s  -> single-freq cycle-skipping confirmed;
+#     ping me and we switch on the frequency-continuation fallback.
 # ============================================================================
 ckpts = sorted(glob.glob(save_prefix + "checkpoint-*.pth"))
 best_ckpt, best_loss = None, 1e18
