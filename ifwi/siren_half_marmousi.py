@@ -150,40 +150,77 @@ assert mae_pre < 0.05, "Pretrain didn't converge — do NOT proceed to Cell 5."
 # Final MAE vs initial must be < 0.05 (assert will stop you if not)
 
 
-# ─── CELL 5 ── IFWI (resumable, saves every 100 epochs) ───────────────────────
-# Set MAX_ITER=1001 for a quick sanity run first (~2h on H100 MIG).
-# After that, change to 8001 and re-run — it auto-resumes from epoch 1001.
-MAX_ITER = 1001
-LR       = 1e-4
-ALPHA    = 0
+# ─── CELL 5 ── IFWI with frequency continuation (resumable) ───────────────────
+# Single-frequency 8Hz cycle-skips on the half model (deep body capped at ~4 km/s).
+# Fix: invert low->high. Each stage seeds the next; observed data regenerated per
+# stage at that peak frequency. Checkpoints every 100 epochs + a stage_final file.
+# Re-running skips finished stages and resumes an interrupted one from its latest ckpt.
+LR    = 1e-4
+ALPHA = 0
+schedule = [(3.0, 1500), (5.0, 1500), (8.0, 2000)]
 
-save_prefix = os.path.join(CKPT,
-    "siren_ifwi_nz{}_nx{}_ns{}_dz{:.0f}_freq{:.0f}_lr{:.0e}-".format(
-        nz, nx, ns, dz, freq, LR))
+prev_weights = pretrain_ckpt
+ifwi_model = None
+save_prefix = None
+t_all = time.time()
 
-ifwi_model = IFWI2D(
-    mean=NORM_MEAN, std=NORM_STD,
-    neuron=[2, 128, 128, 128, 128, 1], omega_0=30, prob=0.2,
-    activation="sine", bias=True, dropout=False, outermost_linear=True,
-    nz=nz, nx=nx, zs=zs, xs=xs, zr=zr, xr=xr, dz=dz, dt=dt,
-    npad=npad, order=2, vmax=vmax, log_para=1e-6,
-    segment_size=len(t), vpadding=None, freeSurface=True,
-    dtype=torch.float32, device=device,
-    pretrained=pretrain_ckpt,
-    netOpt="IFWI")
+for si, (fq, niter) in enumerate(schedule):
+    stage_final = os.path.join(CKPT, "siren_stage{}_freq{:.0f}_final.pth".format(si, fq))
+    prefix = os.path.join(CKPT, "siren_ifwi_stage{}_freq{:.0f}-".format(si, fq))
 
-existing = sorted(glob.glob(save_prefix + "checkpoint-*.pth"),
-                  key=lambda p: int(p.split("checkpoint-")[1].split(".pth")[0]))
-resume = existing[-1] if existing else None
-print("Resume from:", os.path.basename(resume) if resume else "scratch")
+    if os.path.exists(stage_final):
+        print("Stage {} ({:.0f} Hz) already finished -> skipping".format(si, fq))
+        prev_weights = stage_final
+        save_prefix = prefix
+        continue
 
-t0 = time.time()
-train_loss, vpred = ifwi_model.train(
-    MaxIter=MAX_ITER, vmodel=None, wavelet=wavelet, shots=shots,
-    alpha=ALPHA, option=0, log_interval=100, learning_rate=LR,
-    wandb=None, resume_file_name=resume, save_file_name=save_prefix)
-print("\nIFWI finished in {:.2f} h".format((time.time()-t0)/3600))
-np.save(os.path.join(PROJECT, "Data/siren_loss_half.npy"), np.array(train_loss, dtype=object))
+    wav = wGenerator(t, fq).ricker().to(device)
+    with torch.no_grad():
+        _, _, shots_fq, _ = forward_rnn(vmodel=vp_tensor, segment_wavelet=wav)
+
+    ifwi_model = IFWI2D(
+        mean=NORM_MEAN, std=NORM_STD,
+        neuron=[2, 128, 128, 128, 128, 1], omega_0=30, prob=0.2,
+        activation="sine", bias=True, dropout=False, outermost_linear=True,
+        nz=nz, nx=nx, zs=zs, xs=xs, zr=zr, xr=xr, dz=dz, dt=dt,
+        npad=npad, order=2, vmax=vmax, log_para=1e-6,
+        segment_size=len(t), vpadding=None, freeSurface=True,
+        dtype=torch.float32, device=device,
+        pretrained=prev_weights, netOpt="IFWI")
+
+    existing = sorted(glob.glob(prefix + "checkpoint-*.pth"),
+                      key=lambda p: int(p.split("checkpoint-")[1].split(".pth")[0]))
+    resume = existing[-1] if existing else None
+    print("Stage {} ({:.0f} Hz, {} epochs) | resume: {}".format(
+        si, fq, niter, os.path.basename(resume) if resume else "stage start"))
+
+    t0 = time.time()
+    train_loss, vpred = ifwi_model.train(
+        MaxIter=niter, vmodel=None, wavelet=wav, shots=shots_fq,
+        alpha=ALPHA, option=0, log_interval=100, learning_rate=LR,
+        wandb=None, resume_file_name=resume, save_file_name=prefix)
+    print("Stage {} done in {:.2f} h".format(si, (time.time()-t0)/3600))
+
+    torch.save({"state_dict": ifwi_model.vel_net.state_dict()}, stage_final)
+    np.save(os.path.join(PROJECT, "Data/siren_loss_stage{}.npy".format(si)),
+            np.array(train_loss, dtype=object))
+    prev_weights = stage_final
+    save_prefix = prefix
+
+print("\nAll stages finished in {:.2f} h".format((time.time()-t_all)/3600))
+
+# if every stage was skipped (kernel restarted after completion), rebuild a model
+# from the last stage weights so Cell 6 can still evaluate.
+if ifwi_model is None:
+    ifwi_model = IFWI2D(
+        mean=NORM_MEAN, std=NORM_STD,
+        neuron=[2, 128, 128, 128, 128, 1], omega_0=30, prob=0.2,
+        activation="sine", bias=True, dropout=False, outermost_linear=True,
+        nz=nz, nx=nx, zs=zs, xs=xs, zr=zr, xr=xr, dz=dz, dt=dt,
+        npad=npad, order=2, vmax=vmax, log_para=1e-6,
+        segment_size=len(t), vpadding=None, freeSurface=True,
+        dtype=torch.float32, device=device,
+        pretrained=prev_weights, netOpt="IFWI")
 
 # ── what to check ─────────────────────────────────────────────────────────────
 # Loss should decrease over epochs (even slowly)
