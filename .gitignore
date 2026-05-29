@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pth
+*.egg-info/
+dist/
+build/
+.env
+wandb/
+wandb_runs/
+checkpoints/
