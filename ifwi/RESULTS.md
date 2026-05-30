@@ -50,6 +50,21 @@ Figures (saved on the run environment):
 - `SIREN_half_result_3panel.png` — SIREN truth / prediction / error
 - `UNET_half_result_3panel.png` — U-Net truth / prediction / error
 - `SIREN_vs_UNET_comparison.png` — combined 2×3 comparison
+- `SIREN_vs_UNET_loss.png` — data-misfit convergence, both methods
+
+## Convergence
+
+Both methods show the frequency-continuation signature: the data misfit
+jumps up at each stage boundary (epoch 1500 → 5 Hz, epoch 3000 → 8 Hz) as a
+higher frequency makes the data harder to fit, then descends again.
+
+Notably, SIREN reaches a *lower* data misfit in the 3 Hz stage (~1e-6) than
+U-Net, yet U-Net produces the more accurate velocity model. This is the
+classic FWI lesson: a low data misfit does not guarantee a correct model.
+U-Net's convolutional structure acts as a better model-space prior, so it
+generalizes to the true model better at comparable data fit. (SIREN's
+periodic loss spikes are its known Adam/sine-activation behavior and recover
+within a few epochs.)
 
 ## Notes / caveats
 
