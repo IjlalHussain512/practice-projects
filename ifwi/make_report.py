@@ -189,7 +189,7 @@ P("Final MAE = {:.4f} km/s, RMS = {:.4f} km/s. Predicted range {:.3f}-{:.3f} km/
 
 H("9. Comparison")
 IMG(f_cmp, cap="Figure 7. Side-by-side comparison: SIREN (top) and U-Net (bottom).")
-t = doc.add_table(rows=5, cols=3); t.style = "Light Grid Accent 1"
+tbl = doc.add_table(rows=5, cols=3); tbl.style = "Light Grid Accent 1"
 rows = [["Metric", "SIREN", "U-Net"],
         ["Final MAE (km/s)", "{:.4f}".format(ms[0]), "{:.4f}".format(mu[0])],
         ["Final RMS (km/s)", "{:.4f}".format(ms[1]), "{:.4f}".format(mu[1])],
@@ -197,7 +197,7 @@ rows = [["Metric", "SIREN", "U-Net"],
         ["Parameters", "~0.05 M", "~7.76 M"]]
 for i, r in enumerate(rows):
     for j, v in enumerate(r):
-        t.cell(i, j).text = v
+        tbl.cell(i, j).text = v
 if f_loss:
     IMG(f_loss, cap="Figure 8. Data-misfit convergence for both methods (log scale). Jumps mark the 3->5->8 Hz stage transitions.")
 P("U-Net outperforms SIREN on this half-aperture problem in every model-domain "
